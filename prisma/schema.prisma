@@ -1,0 +1,116 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Account {
+  id          String   @id @default(cuid())
+  name        String
+  type        String   // 'card', 'cash', 'deposit', 'crypto'
+  balance     Float    @default(0)
+  currency    String   @default("RUB")
+  icon        String?  // emoji icon
+  color       String?  // hex color
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  transactions Transaction[]
+  goalContributions GoalContribution[]
+}
+
+model Category {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  type        String   // 'income', 'expense'
+  icon        String?
+  color       String?
+  isActive    Boolean  @default(true)
+  parentId    String?
+  parent      Category? @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children    Category[] @relation("CategoryHierarchy")
+  
+  transactions Transaction[]
+}
+
+model Transaction {
+  id          String   @id @default(cuid())
+  amount      Float
+  description String?
+  type        String   // 'income', 'expense', 'transfer'
+  date        DateTime @default(now())
+  
+  accountId   String
+  account     Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  
+  categoryId  String?
+  category    Category? @relation(fields: [categoryId], references: [id])
+  
+  toAccountId String?  // for transfers
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Goal {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  targetAmount Float
+  currentAmount Float   @default(0)
+  targetDate  DateTime?
+  icon        String?
+  color       String?
+  isCompleted Boolean  @default(false)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  contributions GoalContribution[]
+  reminders     Reminder[]
+}
+
+model GoalContribution {
+  id        String   @id @default(cuid())
+  amount    Float
+  date      DateTime @default(now())
+  
+  goalId    String
+  goal      Goal     @relation(fields: [goalId], references: [id], onDelete: Cascade)
+  
+  accountId String
+  account   Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+}
+
+model Reminder {
+  id        String   @id @default(cuid())
+  title     String
+  message   String?
+  type      String   // 'goal', 'payment', 'custom'
+  frequency String   // 'once', 'daily', 'weekly', 'monthly'
+  nextDate  DateTime
+  isActive  Boolean  @default(true)
+  
+  goalId    String?
+  goal      Goal?    @relation(fields: [goalId], references: [id], onDelete: Cascade)
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Settings {
+  id        String   @id @default("settings")
+  currency  String   @default("RUB")
+  language  String   @default("ru")
+  theme     String   @default("auto") // 'light', 'dark', 'auto'
+  
+  updatedAt DateTime @updatedAt
+}

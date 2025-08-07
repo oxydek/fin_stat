@@ -1,0 +1,76 @@
+version: '3.8'
+
+services:
+  # Приложение для разработки с hot reload
+  finstat-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: finstat-dev
+    ports:
+      - "5173:5173"
+      - "5174:5174"  # для Electron
+    environment:
+      - NODE_ENV=development
+      - DATABASE_URL=file:./dev.db
+      - VITE_HMR_HOST=localhost
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - finstat_dev_data:/app/data
+    restart: unless-stopped
+    networks:
+      - finstat-dev-network
+    stdin_open: true
+    tty: true
+
+  # PostgreSQL для разработки
+  postgres-dev:
+    image: postgres:15-alpine
+    container_name: finstat-postgres-dev
+    environment:
+      POSTGRES_DB: finstat_dev
+      POSTGRES_USER: dev_user
+      POSTGRES_PASSWORD: dev_password
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    restart: unless-stopped
+    networks:
+      - finstat-dev-network
+
+  # Redis для разработки
+  redis-dev:
+    image: redis:7-alpine
+    container_name: finstat-redis-dev
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_dev_data:/data
+    restart: unless-stopped
+    networks:
+      - finstat-dev-network
+
+  # Mailhog для тестирования email
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: finstat-mailhog
+    ports:
+      - "1025:1025"  # SMTP
+      - "8025:8025"  # Web UI
+    restart: unless-stopped
+    networks:
+      - finstat-dev-network
+
+volumes:
+  finstat_dev_data:
+    driver: local
+  postgres_dev_data:
+    driver: local
+  redis_dev_data:
+    driver: local
+
+networks:
+  finstat-dev-network:
+    driver: bridge 

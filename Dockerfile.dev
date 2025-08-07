@@ -1,0 +1,37 @@
+# Development Dockerfile с hot reload
+FROM node:18-alpine
+
+# Устанавливаем рабочую директорию
+WORKDIR /app
+
+# Устанавливаем глобальные зависимости
+RUN npm install -g npm@latest
+
+# Копируем package.json и package-lock.json
+COPY package*.json ./
+
+# Устанавливаем все зависимости (включая dev)
+RUN npm install
+
+# Копируем Prisma схему для генерации
+COPY prisma ./prisma/
+
+# Генерируем Prisma Client
+RUN npx prisma generate
+
+# Копируем остальные файлы конфигурации
+COPY vite.config.ts ./
+COPY tailwind.config.js ./
+COPY postcss.config.js ./
+COPY tsconfig.json ./
+COPY index.html ./
+
+# Открываем порты для Vite и Electron
+EXPOSE 5173 5174
+
+# Создаем переменную окружения
+ENV NODE_ENV=development
+ENV DATABASE_URL="file:./dev.db"
+
+# Команда для запуска в dev режиме
+CMD ["npm", "run", "dev"] 
