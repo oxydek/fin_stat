@@ -6,17 +6,16 @@ RUN apk add --no-cache python3 make g++
 
 WORKDIR /app
 
-# Install dependencies
-COPY package.json package-lock.json* ./
-# Use npm ci if lockfile exists, otherwise npm install
-RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
+# Install full dependencies (include dev for build tools like vite)
+COPY package.json ./
+RUN npm install
 
 # Copy sources
 COPY . .
 
 # Build Vite app
 ENV NODE_ENV=production
-RUN npm run build
+RUN npx vite build
 
 # ---------- Production stage: serve via nginx ----------
 FROM nginx:alpine AS production

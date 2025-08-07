@@ -1,7 +1,6 @@
 version: '3.8'
 
 services:
-  # Основное приложение FinStat
   finstat-app:
     build:
       context: .
@@ -10,71 +9,32 @@ services:
     container_name: finstat-app
     ports:
       - "3000:80"
-    environment:
-      - NODE_ENV=production
-      - DATABASE_URL=file:./dev.db
-    volumes:
-      - finstat_data:/app/data
-    restart: unless-stopped
-    networks:
-      - finstat-network
-
-  # Nginx для load balancing (опционально)
-  nginx-proxy:
-    image: nginx:alpine
-    container_name: finstat-proxy
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx-proxy.conf:/etc/nginx/nginx.conf:ro
-      - nginx_logs:/var/log/nginx
     depends_on:
-      - finstat-app
+      - api
     restart: unless-stopped
-    networks:
-      - finstat-network
 
-  # PostgreSQL для production (опционально)
-  postgres:
+  db:
     image: postgres:15-alpine
-    container_name: finstat-postgres
+    container_name: finstat-db
     environment:
       POSTGRES_DB: finstat
-      POSTGRES_USER: finstat_user
-      POSTGRES_PASSWORD: finstat_password
+      POSTGRES_USER: finstat
+      POSTGRES_PASSWORD: finstat
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
-    ports:
-      - "5432:5432"
     restart: unless-stopped
-    networks:
-      - finstat-network
 
-  # Redis для кэширования (опционально)
-  redis:
-    image: redis:7-alpine
-    container_name: finstat-redis
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: finstat-api
+    environment:
+      DATABASE_URL: postgresql://finstat:finstat@db:5432/finstat
+    depends_on:
+      - db
     restart: unless-stopped
-    networks:
-      - finstat-network
-    command: redis-server --appendonly yes
 
 volumes:
-  finstat_data:
-    driver: local
   postgres_data:
-    driver: local
-  redis_data:
-    driver: local
-  nginx_logs:
-    driver: local
-
-networks:
-  finstat-network:
-    driver: bridge 
+    driver: local 
