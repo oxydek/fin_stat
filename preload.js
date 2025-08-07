@@ -1,6 +1,19 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
 contextBridge.exposeInMainWorld('electronAPI', {
-  // Здесь будут методы для взаимодействия с main процессом
-  // Например: openFile, saveFile, showNotification и т.д.
+  getBrokerAccounts: async () => {
+    return await ipcRenderer.invoke('tinkoff:getBrokerAccounts');
+  },
+  getPortfolio: async (accountId) => {
+    return await ipcRenderer.invoke('tinkoff:getPortfolio', accountId);
+  },
+  getPositions: async (accountId) => {
+    return await ipcRenderer.invoke('tinkoff:getPositions', accountId);
+  },
+  getTinkoffToken: async () => {
+    return await ipcRenderer.invoke('tinkoff:getToken');
+  },
+  setTinkoffToken: async (token) => {
+    return await ipcRenderer.invoke('tinkoff:setToken', token);
+  }
 }); 

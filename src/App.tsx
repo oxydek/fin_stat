@@ -4,8 +4,31 @@ import { NotificationSystem } from './components/NotificationSystem'
 import { ReminderModal } from './components/ReminderModal'
 
 function App() {
-  const [isDark, setIsDark] = useState(false)
+  const getInitialTheme = () => {
+    try {
+      const saved = localStorage.getItem('theme')
+      if (saved === 'dark') return true
+      if (saved === 'light') return false
+    } catch {}
+    if (typeof window !== 'undefined' && window.matchMedia) {
+      return window.matchMedia('(prefers-color-scheme: dark)').matches
+    }
+    return false
+  }
+
+  const [isDark, setIsDark] = useState(getInitialTheme())
   const [showReminder, setShowReminder] = useState(false)
+
+  React.useEffect(() => {
+    try {
+      localStorage.setItem('theme', isDark ? 'dark' : 'light')
+    } catch {}
+    try {
+      const root = document.documentElement
+      if (isDark) root.classList.add('dark')
+      else root.classList.remove('dark')
+    } catch {}
+  }, [isDark])
 
   const reloadData = () => {
     // Функция для перезагрузки данных после создания напоминания

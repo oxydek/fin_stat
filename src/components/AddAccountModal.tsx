@@ -182,13 +182,14 @@ export function AddAccountModal({ isOpen, onClose, onAccountAdded }: AddAccountM
                   key={icon}
                   type="button"
                   onClick={() => setFormData(prev => ({ ...prev, icon }))}
-                  className={`p-2 rounded-ios border text-xl transition-colors ${
+                  className={`w-10 h-10 flex items-center justify-center rounded-ios border text-2xl leading-none transition-colors ${
                     formData.icon === icon
                       ? 'border-ios-blue bg-ios-blue bg-opacity-10'
                       : 'border-ios-gray5 dark:border-gray-600 hover:bg-ios-gray6 dark:hover:bg-gray-700'
                   }`}
+                  title={icon}
                 >
-                  {icon}
+                  <span className="leading-none">{icon}</span>
                 </button>
               ))}
             </div>
@@ -221,7 +222,7 @@ export function AddAccountModal({ isOpen, onClose, onAccountAdded }: AddAccountM
               className="w-10 h-10 rounded-full flex items-center justify-center text-lg"
               style={{ backgroundColor: formData.color }}
             >
-              <span className="text-white">{formData.icon}</span>
+              <span className="text-white leading-none">{formData.icon}</span>
             </div>
             <div>
               <div className="font-medium text-gray-900 dark:text-white">

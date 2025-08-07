@@ -1,41 +1,31 @@
-# Базовый образ для сборки
-FROM node:18-alpine AS builder
+# ---------- Builder stage: build SPA with Vite ----------
+FROM node:20-alpine AS builder
 
-# Устанавливаем рабочую директорию
+# System deps for building native modules if needed
+RUN apk add --no-cache python3 make g++
+
 WORKDIR /app
 
-# Копируем package.json и package-lock.json
-COPY package*.json ./
+# Install dependencies
+COPY package.json package-lock.json* ./
+# Use npm ci if lockfile exists, otherwise npm install
+RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
 
-# Устанавливаем зависимости
-RUN npm ci --only=production
-
-# Копируем исходный код
+# Copy sources
 COPY . .
 
-# Создаем переменную окружения для базы данных
-ENV DATABASE_URL="file:./dev.db"
-
-# Генерируем Prisma Client
-RUN npx prisma generate
-
-# Создаем базу данных и применяем миграции
-RUN npx prisma db push
-
-# Собираем приложение для production
+# Build Vite app
+ENV NODE_ENV=production
 RUN npm run build
 
-# Production образ
+# ---------- Production stage: serve via nginx ----------
 FROM nginx:alpine AS production
 
-# Копируем собранное приложение из builder этапа
+# Copy built assets
 COPY --from=builder /app/dist /usr/share/nginx/html
 
-# Копируем конфигурацию nginx
+# Nginx config
 COPY nginx.conf /etc/nginx/nginx.conf
 
-# Открываем порт 80
 EXPOSE 80
-
-# Запускаем nginx
 CMD ["nginx", "-g", "daemon off;"] 
