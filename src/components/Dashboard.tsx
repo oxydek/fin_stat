@@ -4,7 +4,7 @@ import { GoalCard } from './GoalCard'
 import { AddAccountModal } from './AddAccountModal'
 import { AddGoalModal } from './AddGoalModal'
 import { ImportModal } from './ImportModal'
-import { prisma } from '../lib/database'
+// import { prisma } from '../lib/database' // switched to server API
 import { Modal } from './Modal'
 
 interface Account {
@@ -128,14 +128,12 @@ export function Dashboard() {
 
   const loadData = async () => {
     try {
-      // Загружаем реальные данные из (мока) prisma
-      const accountsData = await prisma.account.findMany({
-        where: { isActive: true }
-      })
-      
-      const goalsData = await prisma.goal.findMany({
-        where: { isActive: true }
-      })
+      const accRes = await fetch('/api/accounts')
+      const accJson = await accRes.json()
+      const accountsData = Array.isArray(accJson?.data) ? accJson.data : []
+      const goalRes = await fetch('/api/goals')
+      const goalJson = await goalRes.json()
+      const goalsData = Array.isArray(goalJson?.data) ? goalJson.data : []
 
       setAccounts(
         (accountsData || []).map((a: any) => ({
@@ -169,14 +167,12 @@ export function Dashboard() {
     }
   }
 
-  const loadAccountTransactions = (accountId: string) => {
+  const loadAccountTransactions = async (accountId: string) => {
     try {
-      const raw = localStorage.getItem('finstat_transactions')
-      const list = raw ? JSON.parse(raw) : []
-      const filtered = list
-        .filter((t: any) => t.accountId === accountId)
-        .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime())
-      setAccountTransactions(filtered)
+      const res = await fetch(`/api/transactions?accountId=${encodeURIComponent(accountId)}`)
+      const json = await res.json()
+      const list = Array.isArray(json?.data) ? json.data : []
+      setAccountTransactions(list)
     } catch (e) {
       console.error('Ошибка чтения истории операций:', e)
       setAccountTransactions([])
@@ -254,12 +250,21 @@ export function Dashboard() {
   }
 
   // ===== Actions =====
-  const handleCloseAccount = () => {
+  const handleCloseAccount = async () => {
     if (!selectedAccount) return
-    // локально скрываем, серверная деактивация счетов не обязательна для UI
-    setShowCloseConfirm(false)
-    setShowAccountDetails(false)
-    loadData()
+    try {
+      await fetch(`/api/accounts/${selectedAccount.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isActive: false })
+      })
+    } catch (e) {
+      console.error('Не удалось закрыть счет:', e)
+    } finally {
+      setShowCloseConfirm(false)
+      setShowAccountDetails(false)
+      loadData()
+    }
   }
 
   const handleDeposit = async () => {
@@ -267,19 +272,17 @@ export function Dashboard() {
     const amount = parseFloat(depositAmount)
     if (!amount || amount <= 0) return
 
-    await prisma.transaction.create({
-      data: {
+    await fetch('/api/transactions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
         amount: amount,
         description: 'Пополнение',
         type: 'income',
         date: new Date(),
         accountId: selectedAccount.id,
         categoryId: null
-      }
-    })
-    await prisma.account.update({
-      where: { id: selectedAccount.id },
-      data: { balance: { increment: amount } }
+      })
     })
 
     if (selectedAccount.type === 'deposit') {
@@ -290,7 +293,7 @@ export function Dashboard() {
 
     setDepositAmount('')
     loadData()
-    loadAccountTransactions(selectedAccount.id)
+    await loadAccountTransactions(selectedAccount.id)
   }
 
   const handleWithdraw = async () => {
@@ -298,19 +301,17 @@ export function Dashboard() {
     const amount = parseFloat(withdrawAmount)
     if (!amount || amount <= 0) return
 
-    await prisma.transaction.create({
-      data: {
+    await fetch('/api/transactions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
         amount: -amount,
         description: 'Списание',
         type: 'expense',
         date: new Date(),
         accountId: selectedAccount.id,
         categoryId: null
-      }
-    })
-    await prisma.account.update({
-      where: { id: selectedAccount.id },
-      data: { balance: { increment: -amount } }
+      })
     })
 
     if (selectedAccount.type === 'deposit') {
@@ -321,7 +322,7 @@ export function Dashboard() {
 
     setWithdrawAmount('')
     loadData()
-    loadAccountTransactions(selectedAccount.id)
+    await loadAccountTransactions(selectedAccount.id)
   }
 
   const handleSaveRate = () => {
@@ -340,26 +341,24 @@ export function Dashboard() {
     const interest = await computeAccruedInterest(selectedAccount.id)
     if (interest <= 0) return
 
-    await prisma.transaction.create({
-      data: {
+    await fetch('/api/transactions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
         amount: interest,
         description: 'Начисленные проценты',
         type: 'income',
         date: new Date(),
         accountId: selectedAccount.id,
         categoryId: null
-      }
-    })
-    await prisma.account.update({
-      where: { id: selectedAccount.id },
-      data: { balance: { increment: interest } }
+      })
     })
 
     await syncBucketsAfterInterest(selectedAccount.id)
     const ai = await computeAccruedInterest(selectedAccount.id)
     setAccruedInterest(ai)
     loadData()
-    loadAccountTransactions(selectedAccount.id)
+    await loadAccountTransactions(selectedAccount.id)
   }
 
   const totalBalance = (accounts as any[]).reduce((sum: number, account: any) => sum + account.balance, 0)
@@ -411,15 +410,18 @@ export function Dashboard() {
   }
 
   // ===== Statistics helpers =====
-  const readTransactions = () => {
-    const raw = localStorage.getItem('finstat_transactions')
-    return raw ? JSON.parse(raw) : []
+  const readTransactions = async () => {
+    try {
+      const res = await fetch('/api/transactions')
+      const json = await res.json()
+      return Array.isArray(json?.data) ? json.data : []
+    } catch { return [] }
   }
 
   const monthLabel = (d: Date) => d.toLocaleString('ru-RU', { month: 'short', year: '2-digit' })
 
-  const computeStats = () => {
-    const txs = readTransactions()
+  const computeStats = async () => {
+    const txs = await readTransactions()
     const now = new Date()
     const months: any[] = []
     for (let i = 5; i >= 0; i--) {
@@ -444,12 +446,10 @@ export function Dashboard() {
     const since = new Date()
     since.setDate(since.getDate() - 30)
     const catMap: Record<string, number> = {}
-    const categories = (localStorage.getItem('finstat_categories') ? JSON.parse(localStorage.getItem('finstat_categories') as any) : []) as any[]
-    const catName = (id: string | null) => categories.find(c => c.id === id)?.name || 'Без категории'
     txs.forEach((t: any) => {
       const d = new Date(t.date)
       if (d >= since) {
-        const key = (t.type === 'expense' ? 'Расход: ' : 'Доход: ') + catName(t.categoryId || null)
+        const key = (t.type === 'expense' ? 'Расход' : 'Доход')
         catMap[key] = (catMap[key] || 0) + Math.abs(t.amount)
       }
     })
@@ -468,22 +468,12 @@ export function Dashboard() {
   }
 
   // ===== Goals helpers =====
-  const readGoalsStore = () => {
-    const raw = localStorage.getItem('finstat_goals')
-    return raw ? JSON.parse(raw) : []
-  }
-  const writeGoalsStore = (rows: any[]) => {
-    localStorage.setItem('finstat_goals', JSON.stringify(rows))
-  }
-
-  const updateGoalInStore = (goalId: string, patch: (g: any) => void) => {
-    const rows = readGoalsStore()
-    const idx = rows.findIndex((g: any) => g.id === goalId)
-    if (idx === -1) return
-    const cloned = { ...rows[idx] }
-    patch(cloned)
-    rows[idx] = cloned
-    writeGoalsStore(rows)
+  const updateGoalOnServer = async (goalId: string, data: any) => {
+    await fetch(`/api/goals/${goalId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    })
   }
 
   const handleContributeToGoal = async () => {
@@ -492,29 +482,10 @@ export function Dashboard() {
     if (!amt || amt <= 0) return
     if (!contributionAccountId) return
 
-    // Списываем со счета
-    await prisma.transaction.create({
-      data: {
-        amount: -amt,
-        description: `Взнос в цель: ${selectedGoal.name}`,
-        type: 'expense',
-        date: new Date(),
-        accountId: contributionAccountId,
-        categoryId: null
-      }
-    })
-    await prisma.account.update({
-      where: { id: contributionAccountId },
-      data: { balance: { increment: -amt } }
-    })
-
-    // Увеличиваем текущую сумму цели
-    updateGoalInStore(selectedGoal.id, (g: any) => {
-      const next = (g.currentAmount || 0) + amt
-      g.currentAmount = next
-      if (g.targetAmount && next >= g.targetAmount) {
-        g.isCompleted = true
-      }
+    await fetch(`/api/goals/${selectedGoal.id}/contributions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ amount: amt, fromAccountId: contributionAccountId })
     })
 
     setContributionAmount('')
@@ -528,9 +499,7 @@ export function Dashboard() {
     const goalId = selectedGoal.id
     setClosingGoalId(goalId)
     setTimeout(() => {
-      updateGoalInStore(goalId, (g: any) => {
-        g.isActive = false
-      })
+      updateGoalOnServer(goalId, { isActive: false })
       setShowGoalDetails(false)
       loadData()
       setClosingGoalId('')
@@ -917,7 +886,7 @@ export function Dashboard() {
             {/* Contribution */}
             <div className="bg-ios-gray6 dark:bg-gray-700 rounded-ios p-4">
               <div className="font-medium mb-2">Отложить на цель</div>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-end">
                 <div>
                   <label className="block text-sm mb-1 text-ios-gray dark:text-gray-400">Сумма</label>
                   <input
@@ -925,7 +894,7 @@ export function Dashboard() {
                     placeholder="Сумма"
                     value={contributionAmount}
                     onChange={(e: any) => setContributionAmount(e.target.value)}
-                    className="w-full p-2 rounded-ios border border-ios-gray5 dark:border-gray-600 bg-white dark:bg-gray-800"
+                    className="w-full p-3 rounded-ios border border-ios-gray5 dark:border-gray-600 bg-white dark:bg-gray-800"
                   />
                 </div>
                 <div>
@@ -933,7 +902,7 @@ export function Dashboard() {
                   <select
                     value={contributionAccountId}
                     onChange={(e: any) => setContributionAccountId(e.target.value)}
-                    className="w-full p-2 rounded-ios border border-ios-gray5 dark:border-gray-600 bg-white dark:bg-gray-800"
+                    className="w-full p-3 rounded-ios border border-ios-gray5 dark:border-gray-600 bg-white dark:bg-gray-800"
                   >
                     <option value="">Выберите счет</option>
                     {(accounts as any[]).map((a) => (
@@ -943,10 +912,10 @@ export function Dashboard() {
                     ))}
                   </select>
                 </div>
-                <div className="flex gap-2">
-                  <button onClick={handleContributeToGoal} className="flex-1 py-2 rounded-ios bg-ios-green text-white hover:bg-green-600">Отложить</button>
-                  <button onClick={handleCloseGoal} className="px-4 py-2 rounded-ios bg-ios-red text-white hover:bg-red-600">Закрыть цель</button>
-                </div>
+              </div>
+              <div className="mt-3 flex flex-col sm:flex-row gap-2 w-full">
+                <button onClick={handleContributeToGoal} className="flex-1 py-3 rounded-ios bg-ios-green text-white hover:bg-green-600">Отложить</button>
+                <button onClick={handleCloseGoal} className="flex-1 py-3 rounded-ios bg-ios-red text-white hover:bg-red-600">Закрыть цель</button>
               </div>
             </div>
           </div>
@@ -1132,8 +1101,15 @@ export function Dashboard() {
               try {
                 const r = await fetch('/api/token', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: tokenValue }) })
                 const j = await r.json()
-                if (j?.ok) setShowToken(false)
-              } catch {}
+                if (j?.ok) {
+                  setShowToken(false)
+                  try { (window as any).showNotification?.({ title: 'Токен сохранён', message: 'T‑Invest токен успешно сохранён', type: 'success' }) } catch {}
+                } else {
+                  try { (window as any).showNotification?.({ title: 'Ошибка сохранения токена', message: j?.error || 'Не удалось сохранить токен', type: 'error' }) } catch {}
+                }
+              } catch (e:any) {
+                try { (window as any).showNotification?.({ title: 'Ошибка сети', message: e?.message || String(e), type: 'error' }) } catch {}
+              }
             }}>Сохранить</button>
             <button className="px-4 py-2 rounded-ios bg-ios-gray5 dark:bg-gray-700" onClick={() => setShowToken(false)}>Отмена</button>
           </div>

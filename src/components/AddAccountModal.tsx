@@ -1,6 +1,5 @@
 import React, { useState } from 'react'
 import { Modal } from './Modal'
-import { prisma } from '../lib/database'
 
 interface AddAccountModalProps {
   isOpen: boolean
@@ -41,7 +40,7 @@ export function AddAccountModal({ isOpen, onClose, onAccountAdded }: AddAccountM
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: any) => {
     e.preventDefault()
     setError('')
     setLoading(true)
@@ -51,16 +50,25 @@ export function AddAccountModal({ isOpen, onClose, onAccountAdded }: AddAccountM
         throw new Error('Название счета обязательно')
       }
 
-      await prisma.account.create({
-        data: {
-          name: formData.name.trim(),
-          type: formData.type,
-          balance: formData.balance,
-          currency: formData.currency,
-          icon: formData.icon,
-          color: formData.color,
-        }
+      const payload = {
+        name: formData.name.trim(),
+        type: formData.type,
+        balance: formData.balance,
+        currency: formData.currency,
+        icon: formData.icon,
+        color: formData.color
+      }
+
+      const res = await fetch('/api/accounts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
       })
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data?.error || 'Не удалось создать счет')
+      }
 
       // Reset form
       setFormData({
@@ -84,7 +92,7 @@ export function AddAccountModal({ isOpen, onClose, onAccountAdded }: AddAccountM
   const handleTypeChange = (type: string) => {
     const accountType = accountTypes.find(t => t.value === type)
     if (accountType) {
-      setFormData(prev => ({
+      setFormData((prev: any) => ({
         ...prev,
         type,
         icon: accountType.icon,
@@ -104,7 +112,7 @@ export function AddAccountModal({ isOpen, onClose, onAccountAdded }: AddAccountM
           <input
             type="text"
             value={formData.name}
-            onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
+            onChange={(e: any) => setFormData((prev: any) => ({ ...prev, name: e.target.value }))}
             className="w-full p-3 rounded-ios border border-ios-gray5 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-ios-blue"
             placeholder="Например, Основная карта"
             required
@@ -146,7 +154,7 @@ export function AddAccountModal({ isOpen, onClose, onAccountAdded }: AddAccountM
             type="number"
             step="0.01"
             value={formData.balance}
-            onChange={(e) => setFormData(prev => ({ ...prev, balance: parseFloat(e.target.value) || 0 }))}
+            onChange={(e: any) => setFormData((prev: any) => ({ ...prev, balance: parseFloat(e.target.value) || 0 }))}
             className="w-full p-3 rounded-ios border border-ios-gray5 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-ios-blue"
             placeholder="0"
           />
@@ -159,7 +167,7 @@ export function AddAccountModal({ isOpen, onClose, onAccountAdded }: AddAccountM
           </label>
           <select
             value={formData.currency}
-            onChange={(e) => setFormData(prev => ({ ...prev, currency: e.target.value }))}
+            onChange={(e: any) => setFormData((prev: any) => ({ ...prev, currency: e.target.value }))}
             className="w-full p-3 rounded-ios border border-ios-gray5 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-ios-blue"
           >
             {currencies.map((currency) => (
@@ -181,7 +189,7 @@ export function AddAccountModal({ isOpen, onClose, onAccountAdded }: AddAccountM
                 <button
                   key={icon}
                   type="button"
-                  onClick={() => setFormData(prev => ({ ...prev, icon }))}
+                  onClick={() => setFormData((prev: any) => ({ ...prev, icon }))}
                   className={`w-10 h-10 flex items-center justify-center rounded-ios border text-2xl leading-none transition-colors ${
                     formData.icon === icon
                       ? 'border-ios-blue bg-ios-blue bg-opacity-10'
@@ -204,7 +212,7 @@ export function AddAccountModal({ isOpen, onClose, onAccountAdded }: AddAccountM
                 <button
                   key={color}
                   type="button"
-                  onClick={() => setFormData(prev => ({ ...prev, color }))}
+                  onClick={() => setFormData((prev: any) => ({ ...prev, color }))}
                   className={`w-8 h-8 rounded-full border-2 transition-transform hover:scale-110 ${
                     formData.color === color ? 'border-gray-900 dark:border-white' : 'border-transparent'
                   }`}

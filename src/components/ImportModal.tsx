@@ -1,6 +1,5 @@
 import React, { useState } from 'react'
 import { Modal } from './Modal'
-import { prisma } from '../lib/database'
 import Papa from 'papaparse'
 import * as XLSX from 'xlsx'
 
@@ -61,11 +60,11 @@ const bankTemplates = [
 ]
 
 export function ImportModal({ isOpen, onClose, onTransactionsImported }: ImportModalProps) {
-  const [file, setFile] = useState<File | null>(null)
+  const [file, setFile] = useState(null)
   const [selectedBank, setSelectedBank] = useState('sberbank')
   const [selectedAccount, setSelectedAccount] = useState('')
-  const [accounts, setAccounts] = useState<any[]>([])
-  const [preview, setPreview] = useState<ParsedTransaction[]>([])
+  const [accounts, setAccounts] = useState([])
+  const [preview, setPreview] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [step, setStep] = useState(1) // 1: выбор файла, 2: настройка, 3: предпросмотр
@@ -78,20 +77,19 @@ export function ImportModal({ isOpen, onClose, onTransactionsImported }: ImportM
 
   const loadAccounts = async () => {
     try {
-      const accountsData = await prisma.account.findMany({
-        where: { isActive: true },
-        select: { id: true, name: true, type: true, icon: true, color: true }
-      })
-      setAccounts(accountsData)
+      const res = await fetch('/api/accounts')
+      const json = await res.json()
+      const accountsData = Array.isArray(json?.data) ? json.data : []
+      setAccounts(accountsData as any)
       if (accountsData.length > 0) {
-        setSelectedAccount(accountsData[0].id)
+        setSelectedAccount((accountsData as any)[0].id)
       }
     } catch (error) {
       console.error('Ошибка загрузки счетов:', error)
     }
   }
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = (e: any) => {
     const selectedFile = e.target.files?.[0]
     if (selectedFile) {
       setFile(selectedFile)
@@ -105,16 +103,16 @@ export function ImportModal({ isOpen, onClose, onTransactionsImported }: ImportM
     setLoading(true)
     setError('')
 
-    const fileExtension = file.name.split('.').pop()?.toLowerCase()
+    const fileExtension = (file as any).name.split('.').pop()?.toLowerCase()
 
     if (fileExtension === 'csv') {
-      Papa.parse(file, {
+      Papa.parse(file as any, {
         header: true,
         encoding: 'UTF-8',
-        complete: (results) => {
+        complete: (results: any) => {
           try {
             const transactions = parseTransactions(results.data as any[])
-            setPreview(transactions)
+            setPreview(transactions as any)
             setStep(3)
           } catch (err) {
             setError('Ошибка парсинга CSV файла: ' + (err as Error).message)
@@ -122,23 +120,23 @@ export function ImportModal({ isOpen, onClose, onTransactionsImported }: ImportM
             setLoading(false)
           }
         },
-        error: (error) => {
+        error: (error: any) => {
           setError('Ошибка чтения CSV файла: ' + error.message)
           setLoading(false)
         }
       })
     } else if (fileExtension === 'xlsx' || fileExtension === 'xls') {
       const reader = new FileReader()
-      reader.onload = (e) => {
+      reader.onload = (e: any) => {
         try {
-          const data = new Uint8Array(e.target?.result as ArrayBuffer)
+          const data = new Uint8Array((e.target?.result as ArrayBuffer))
           const workbook = XLSX.read(data, { type: 'array' })
           const sheetName = workbook.SheetNames[0]
           const worksheet = workbook.Sheets[sheetName]
           const jsonData = XLSX.utils.sheet_to_json(worksheet)
           
           const transactions = parseTransactions(jsonData as any[])
-          setPreview(transactions)
+          setPreview(transactions as any)
           setStep(3)
         } catch (err) {
           setError('Ошибка парсинга Excel файла: ' + (err as Error).message)
@@ -146,7 +144,7 @@ export function ImportModal({ isOpen, onClose, onTransactionsImported }: ImportM
           setLoading(false)
         }
       }
-      reader.readAsArrayBuffer(file)
+      reader.readAsArrayBuffer(file as any)
     } else {
       setError('Поддерживаются только файлы CSV и Excel (.xlsx, .xls)')
       setLoading(false)
@@ -157,11 +155,11 @@ export function ImportModal({ isOpen, onClose, onTransactionsImported }: ImportM
     const template = bankTemplates.find(t => t.id === selectedBank)
     if (!template) throw new Error('Шаблон банка не найден')
 
-    return data.map((row, index) => {
+    return data.map((row: any, index: number) => {
       try {
-        const dateStr = row[template.columns.date]
-        const description = row[template.columns.description] || `Операция ${index + 1}`
-        const amountStr = row[template.columns.amount]
+        const dateStr = (row as any)[(template as any).columns.date]
+        const description = (row as any)[(template as any).columns.description] || `Операция ${index + 1}`
+        const amountStr = (row as any)[(template as any).columns.amount]
 
         if (!dateStr || !amountStr) {
           throw new Error(`Строка ${index + 1}: отсутствуют обязательные поля`)
@@ -179,7 +177,7 @@ export function ImportModal({ isOpen, onClose, onTransactionsImported }: ImportM
           
           let parsedDate: Date | null = null
           for (const format of dateFormats) {
-            const match = dateStr.match(format)
+            const match = (dateStr as string).match(format)
             if (match) {
               if (format === dateFormats[0] || format === dateFormats[2]) {
                 // DD.MM.YYYY или DD/MM/YYYY
@@ -219,12 +217,12 @@ export function ImportModal({ isOpen, onClose, onTransactionsImported }: ImportM
           date,
           description: description.toString(),
           amount: Math.abs(amount),
-          type: amount >= 0 ? 'income' : 'expense' as 'income' | 'expense'
+          type: (amount >= 0 ? 'income' : 'expense') as 'income' | 'expense'
         }
       } catch (err) {
         throw new Error(`Ошибка в строке ${index + 1}: ${(err as Error).message}`)
       }
-    }).filter(t => t.amount > 0) // убираем пустые транзакции
+    }).filter((t: any) => t.amount > 0) // убираем пустые транзакции
   }
 
   const importTransactions = async () => {
@@ -234,44 +232,25 @@ export function ImportModal({ isOpen, onClose, onTransactionsImported }: ImportM
     setError('')
 
     try {
-      // Загружаем категории
-      const categories = await prisma.category.findMany({
-        where: { isActive: true }
-      })
-
-      // Создаем транзакции
-      for (const transaction of preview) {
-        // Пытаемся автоматически определить категорию
-        const category = categories.find(cat => 
-          cat.type === transaction.type && 
-          cat.name.toLowerCase().includes(transaction.description.toLowerCase().slice(0, 10))
-        ) || categories.find(cat => cat.type === transaction.type)
-
-        await prisma.transaction.create({
-          data: {
-            amount: transaction.type === 'expense' ? -transaction.amount : transaction.amount,
-            description: transaction.description,
-            type: transaction.type,
-            date: new Date(transaction.date),
-            accountId: selectedAccount,
-            categoryId: category?.id || null
-          }
-        })
-      }
-
-      // Обновляем баланс счета
-      const totalAmount = preview.reduce((sum, t) => {
-        return sum + (t.type === 'income' ? t.amount : -t.amount)
-      }, 0)
-
-      await prisma.account.update({
-        where: { id: selectedAccount },
-        data: {
-          balance: {
-            increment: totalAmount
-          }
+      for (const transaction of preview as any[]) {
+        const payload = {
+          amount: (transaction as any).type === 'expense' ? -(transaction as any).amount : (transaction as any).amount,
+          description: (transaction as any).description,
+          type: (transaction as any).type,
+          date: (transaction as any).date,
+          accountId: selectedAccount as any,
+          categoryId: null
         }
-      })
+        const res = await fetch('/api/transactions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        })
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}))
+          throw new Error(data?.error || 'Не удалось импортировать транзакцию')
+        }
+      }
 
       onTransactionsImported()
       onClose()
@@ -285,7 +264,7 @@ export function ImportModal({ isOpen, onClose, onTransactionsImported }: ImportM
 
   const resetForm = () => {
     setFile(null)
-    setPreview([])
+    setPreview([] as any)
     setStep(1)
     setError('')
   }
@@ -307,7 +286,7 @@ export function ImportModal({ isOpen, onClose, onTransactionsImported }: ImportM
               </label>
               <select
                 value={selectedBank}
-                onChange={(e) => setSelectedBank(e.target.value)}
+                onChange={(e: any) => setSelectedBank(e.target.value)}
                 className="w-full p-3 rounded-ios border border-ios-gray5 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-ios-blue"
               >
                 {bankTemplates.map((bank) => (
@@ -324,10 +303,10 @@ export function ImportModal({ isOpen, onClose, onTransactionsImported }: ImportM
               </label>
               <select
                 value={selectedAccount}
-                onChange={(e) => setSelectedAccount(e.target.value)}
+                onChange={(e: any) => setSelectedAccount(e.target.value)}
                 className="w-full p-3 rounded-ios border border-ios-gray5 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-ios-blue"
               >
-                {accounts.map((account) => (
+                {(accounts as any[]).map((account: any) => (
                   <option key={account.id} value={account.id}>
                     {account.icon} {account.name}
                   </option>
@@ -374,10 +353,10 @@ export function ImportModal({ isOpen, onClose, onTransactionsImported }: ImportM
           <>
             <div>
               <h4 className="font-medium text-gray-900 dark:text-white mb-3">
-                Предпросмотр ({preview.length} транзакций)
+                Предпросмотр ({(preview as any[]).length} транзакций)
               </h4>
               <div className="max-h-64 overflow-y-auto bg-ios-gray6 dark:bg-gray-700 rounded-ios p-4">
-                {preview.slice(0, 10).map((transaction, index) => (
+                {(preview as any[]).slice(0, 10).map((transaction: any, index: number) => (
                   <div key={index} className="flex justify-between items-center py-2 border-b border-ios-gray5 dark:border-gray-600 last:border-b-0">
                     <div>
                       <div className="font-medium text-gray-900 dark:text-white">
@@ -392,9 +371,9 @@ export function ImportModal({ isOpen, onClose, onTransactionsImported }: ImportM
                     </div>
                   </div>
                 ))}
-                {preview.length > 10 && (
+                {(preview as any[]).length > 10 && (
                   <div className="text-center text-sm text-ios-gray dark:text-gray-400 mt-2">
-                    ... и еще {preview.length - 10} транзакций
+                    ... и еще {(preview as any[]).length - 10} транзакций
                   </div>
                 )}
               </div>

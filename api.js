@@ -135,6 +135,18 @@ app.post('/api/goals', async (req, res) => {
   }
 })
 
+// Update goal (close, edit, etc.)
+app.patch('/api/goals/:id', async (req, res) => {
+  try {
+    const { id } = req.params
+    const data = req.body || {}
+    const updated = await prisma.goal.update({ where: { id }, data })
+    res.json({ ok: true, data: updated })
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e instanceof Error ? e.message : String(e) })
+  }
+})
+
 app.post('/api/goals/:id/contributions', async (req, res) => {
   try {
     const { id } = req.params

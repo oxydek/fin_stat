@@ -1,6 +1,5 @@
 import React, { useState } from 'react'
 import { Modal } from './Modal'
-import { prisma } from '../lib/database'
 
 interface AddGoalModalProps {
   isOpen: boolean
@@ -54,10 +53,20 @@ export function AddGoalModal({ isOpen, onClose, onGoalAdded }: AddGoalModalProps
       }
 
       if (formData.targetDate) {
-        goalData.targetDate = new Date(formData.targetDate)
+        // отправляем строку даты; на сервере она будет преобразована в Date
+        goalData.targetDate = formData.targetDate
       }
 
-      await prisma.goal.create({ data: goalData })
+      const res = await fetch('/api/goals', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(goalData)
+      })
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data?.error || 'Не удалось создать цель')
+      }
 
       // Reset form
       setFormData({
