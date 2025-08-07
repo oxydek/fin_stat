@@ -14,6 +14,33 @@ app.get('/api/health', (_req, res) => {
   res.json({ ok: true })
 })
 
+// Token management
+app.get('/api/token', async (_req, res) => {
+  try {
+    const s = await prisma.settings.upsert({
+      where: { id: 'settings' },
+      update: {},
+      create: { id: 'settings' }
+    })
+    res.json({ ok: true, data: s.tinkoffToken || '' })
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e instanceof Error ? e.message : String(e) })
+  }
+})
+app.post('/api/token', async (req, res) => {
+  try {
+    const token = String(req.body?.token || '')
+    const s = await prisma.settings.upsert({
+      where: { id: 'settings' },
+      update: { tinkoffToken: token },
+      create: { id: 'settings', tinkoffToken: token }
+    })
+    res.json({ ok: true })
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e instanceof Error ? e.message : String(e) })
+  }
+})
+
 // Accounts
 app.get('/api/accounts', async (req, res) => {
   try {

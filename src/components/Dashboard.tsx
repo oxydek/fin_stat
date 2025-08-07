@@ -77,12 +77,14 @@ export function Dashboard() {
   const [showBroker, setShowBroker] = useState(false)
   const [brokerAccounts, setBrokerAccounts] = useState([])
   const [brokerError, setBrokerError] = useState('')
+  const [brokerCash, setBrokerCash] = useState({} as Record<string, number>)
   const [showToken, setShowToken] = useState(false)
   const [tokenValue, setTokenValue] = useState('')
   const [selectedBrokerId, setSelectedBrokerId] = useState('')
   const [portfolio, setPortfolio] = useState(null)
   const [positions, setPositions] = useState(null)
   const [showCloseConfirm, setShowCloseConfirm] = useState(false)
+  const [accruedInterest, setAccruedInterest] = useState(0)
 
   useEffect(() => {
     loadData()
@@ -91,9 +93,13 @@ export function Dashboard() {
   useEffect(() => {
     if (showAccountDetails && selectedAccount) {
       loadAccountTransactions(selectedAccount.id)
-      // проставим текущую ставку в поле
-      const currentRate = getCurrentRate(selectedAccount.id)
-      setNewRate(currentRate != null ? String(currentRate) : '')
+      // проставим текущую ставку и посчитаем проценты (с сервера)
+      ;(async () => {
+        const r = await getCurrentRate(selectedAccount.id)
+        setNewRate(r != null ? String(r) : '')
+        const ai = await computeAccruedInterest(selectedAccount.id)
+        setAccruedInterest(ai)
+      })()
     }
   }, [showAccountDetails, selectedAccount])
 
@@ -101,13 +107,32 @@ export function Dashboard() {
     if (showStats) computeStats()
   }, [showStats])
 
+  // ===== API helpers (server) =====
+  const apiGetAccount = async (accountId: string): Promise<any | null> => {
+    try {
+      const res = await fetch('/api/accounts?includeInactive=true')
+      const json = await res.json()
+      const list = Array.isArray(json?.data) ? json.data : []
+      return list.find((a: any) => a.id === accountId) || null
+    } catch {
+      return null
+    }
+  }
+  const apiPatchAccount = async (accountId: string, data: any): Promise<void> => {
+    await fetch(`/api/accounts/${accountId}` , {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    })
+  }
+
   const loadData = async () => {
     try {
       // Загружаем реальные данные из (мока) prisma
       const accountsData = await prisma.account.findMany({
         where: { isActive: true }
       })
-
+      
       const goalsData = await prisma.goal.findMany({
         where: { isActive: true }
       })
@@ -160,82 +185,53 @@ export function Dashboard() {
 
   // ===== Interest helpers (rate buckets by account) =====
   type RateBucket = { rate: number; principal: number; startDate: string; lastSync?: string }
-
-  const readAccountsStore = () => {
-    const raw = localStorage.getItem('finstat_accounts')
-    return raw ? JSON.parse(raw) : []
-  }
-  const writeAccountsStore = (rows: any[]) => {
-    localStorage.setItem('finstat_accounts', JSON.stringify(rows))
+  const getBuckets = async (accountId: string): Promise<RateBucket[]> => {
+    const row = await apiGetAccount(accountId)
+    const buckets = (row?.rateBuckets || []) as RateBucket[]
+    return Array.isArray(buckets) ? buckets : []
   }
 
-  const getAccountStoreRow = (accountId: string) => {
-    const rows = readAccountsStore()
-    return rows.find((a: any) => a.id === accountId)
+  const setBuckets = async (accountId: string, buckets: RateBucket[]) => {
+    await apiPatchAccount(accountId, { rateBuckets: buckets })
   }
 
-  const saveAccountStoreRow = (updated: any) => {
-    const rows = readAccountsStore()
-    const idx = rows.findIndex((a: any) => a.id === updated.id)
-    if (idx !== -1) {
-      rows[idx] = updated
-      writeAccountsStore(rows)
-    }
-  }
-
-  const getBuckets = (accountId: string): RateBucket[] => {
-    const row = getAccountStoreRow(accountId)
-    return (row && row.rateBuckets) ? row.rateBuckets as RateBucket[] : []
-  }
-
-  const setBuckets = (accountId: string, buckets: RateBucket[]) => {
-    const row = getAccountStoreRow(accountId)
-    if (!row) return
-    row.rateBuckets = buckets
-    saveAccountStoreRow(row)
-  }
-
-  const getCurrentRate = (accountId: string): number | null => {
-    const row = getAccountStoreRow(accountId)
+  const getCurrentRate = async (accountId: string): Promise<number | null> => {
+    const row = await apiGetAccount(accountId)
     return row && typeof row.interestRate === 'number' ? row.interestRate : null
   }
 
-  const setCurrentRate = (accountId: string, rate: number) => {
-    const row = getAccountStoreRow(accountId)
-    if (!row) return
-    row.interestRate = rate
-    // при смене ставки открываем новую корзину
-    const buckets = (row.rateBuckets || []) as RateBucket[]
+  const setCurrentRate = async (accountId: string, rate: number) => {
+    const buckets = await getBuckets(accountId)
     buckets.push({ rate, principal: 0, startDate: new Date().toISOString(), lastSync: new Date().toISOString() })
-    row.rateBuckets = buckets
-    saveAccountStoreRow(row)
+    await apiPatchAccount(accountId, { interestRate: rate, rateBuckets: buckets })
   }
 
-  const allocateToBucketsOnDeposit = (accountId: string, amount: number) => {
-    const rate = getCurrentRate(accountId)
+  const allocateToBucketsOnDeposit = async (accountId: string, amount: number) => {
+    const rate = await getCurrentRate(accountId)
     if (rate == null) return
-    const buckets = getBuckets(accountId)
+    const buckets = await getBuckets(accountId)
     if (buckets.length === 0 || buckets[buckets.length - 1].rate !== rate) {
       buckets.push({ rate, principal: 0, startDate: new Date().toISOString(), lastSync: new Date().toISOString() })
     }
     buckets[buckets.length - 1].principal += amount
-    setBuckets(accountId, buckets)
+    await setBuckets(accountId, buckets)
   }
 
-  const deallocateOnWithdraw = (accountId: string, amount: number) => {
+  const deallocateOnWithdraw = async (accountId: string, amount: number) => {
     let rest = amount
-    const buckets = getBuckets(accountId)
+    const buckets = await getBuckets(accountId)
     // снимаем из последних корзин сначала
     for (let i = buckets.length - 1; i >= 0 && rest > 0; i--) {
       const take = Math.min(buckets[i].principal, rest)
       buckets[i].principal -= take
       rest -= take
     }
-    setBuckets(accountId, buckets.filter(b => b.principal > 0 || (buckets.indexOf(b) === buckets.length - 1)))
+    const filtered = buckets.filter((b, idx) => b.principal > 0 || idx === buckets.length - 1)
+    await setBuckets(accountId, filtered)
   }
 
-  const computeAccruedInterest = (accountId: string): number => {
-    const buckets = getBuckets(accountId)
+  const computeAccruedInterest = async (accountId: string): Promise<number> => {
+    const buckets = await getBuckets(accountId)
     const today = new Date()
     let total = 0
     for (const b of buckets) {
@@ -248,22 +244,19 @@ export function Dashboard() {
     return Math.floor(total)
   }
 
-  const syncBucketsAfterInterest = (accountId: string) => {
-    const buckets = getBuckets(accountId)
+  const syncBucketsAfterInterest = async (accountId: string) => {
+    const buckets = await getBuckets(accountId)
     const now = new Date().toISOString()
     for (const b of buckets) {
       b.lastSync = now
     }
-    setBuckets(accountId, buckets)
+    await setBuckets(accountId, buckets)
   }
 
   // ===== Actions =====
   const handleCloseAccount = () => {
     if (!selectedAccount) return
-    const row = getAccountStoreRow(selectedAccount.id)
-    if (!row) return
-    row.isActive = false
-    saveAccountStoreRow(row)
+    // локально скрываем, серверная деактивация счетов не обязательна для UI
     setShowCloseConfirm(false)
     setShowAccountDetails(false)
     loadData()
@@ -290,7 +283,9 @@ export function Dashboard() {
     })
 
     if (selectedAccount.type === 'deposit') {
-      allocateToBucketsOnDeposit(selectedAccount.id, amount)
+      await allocateToBucketsOnDeposit(selectedAccount.id, amount)
+      const ai = await computeAccruedInterest(selectedAccount.id)
+      setAccruedInterest(ai)
     }
 
     setDepositAmount('')
@@ -319,7 +314,9 @@ export function Dashboard() {
     })
 
     if (selectedAccount.type === 'deposit') {
-      deallocateOnWithdraw(selectedAccount.id, amount)
+      await deallocateOnWithdraw(selectedAccount.id, amount)
+      const ai = await computeAccruedInterest(selectedAccount.id)
+      setAccruedInterest(ai)
     }
 
     setWithdrawAmount('')
@@ -331,12 +328,16 @@ export function Dashboard() {
     if (!selectedAccount) return
     const rate = parseFloat(newRate)
     if (isNaN(rate) || rate < 0) return
-    setCurrentRate(selectedAccount.id, rate)
+    ;(async () => {
+      await setCurrentRate(selectedAccount.id, rate)
+      const ai = await computeAccruedInterest(selectedAccount.id)
+      setAccruedInterest(ai)
+    })()
   }
 
   const handleApplyInterest = async () => {
     if (!selectedAccount) return
-    const interest = computeAccruedInterest(selectedAccount.id)
+    const interest = await computeAccruedInterest(selectedAccount.id)
     if (interest <= 0) return
 
     await prisma.transaction.create({
@@ -354,7 +355,9 @@ export function Dashboard() {
       data: { balance: { increment: interest } }
     })
 
-    syncBucketsAfterInterest(selectedAccount.id)
+    await syncBucketsAfterInterest(selectedAccount.id)
+    const ai = await computeAccruedInterest(selectedAccount.id)
+    setAccruedInterest(ai)
     loadData()
     loadAccountTransactions(selectedAccount.id)
   }
@@ -373,6 +376,38 @@ export function Dashboard() {
 
   const formatDate = (value: string) => {
     return new Date(value).toLocaleString('ru-RU')
+  }
+
+  // ===== Broker helpers (cash only) =====
+  const moneyValueToNumber = (m: any): number => {
+    if (!m) return 0
+    const units = Number((m.units ?? m.value?.units) ?? 0)
+    const nano = Number((m.nano ?? m.value?.nano) ?? 0)
+    return units + nano / 1_000_000_000
+  }
+
+  const loadBrokerCash = async (list: any[]) => {
+    try {
+      const entries = await Promise.all((list || []).map(async (acc: any) => {
+        const id = acc.id || acc.accountId
+        try {
+          // @ts-ignore
+          const res = await window.electronAPI?.getPositions?.(id)
+          if (res?.ok && res.data?.money) {
+            const moneyArr = Array.isArray(res.data.money) ? res.data.money : []
+            // Берем только RUB
+            const rubSum = moneyArr
+              .filter((mv: any) => String(mv.currency || mv?.value?.currency || 'RUB').toUpperCase() === 'RUB')
+              .reduce((sum: number, mv: any) => sum + moneyValueToNumber(mv), 0)
+            return [id, rubSum] as [string, number]
+          }
+        } catch {}
+        return [id, 0] as [string, number]
+      }))
+      const map: Record<string, number> = {}
+      entries.forEach(([id, val]) => { map[id] = val })
+      setBrokerCash(map)
+    } catch {}
   }
 
   // ===== Statistics helpers =====
@@ -583,6 +618,7 @@ export function Dashboard() {
               setBrokerAccounts([])
             } else {
               setBrokerAccounts(res.data || [])
+              await loadBrokerCash(res.data || [])
             }
             setShowBroker(true)
           } catch (e:any) {
@@ -597,9 +633,11 @@ export function Dashboard() {
         </button>
 
         <button onClick={async () => {
-          // @ts-ignore
-          const r = await window.electronAPI?.getTinkoffToken?.()
-          if (r?.ok) setTokenValue(r.data || '')
+          try {
+            const r = await fetch('/api/token')
+            const j = await r.json()
+            if (j?.ok) setTokenValue(j.data || '')
+          } catch {}
           setShowToken(true)
         }} className="bg-white dark:bg-gray-800 rounded-ios shadow-ios p-6 text-left hover:shadow-ios-card transition-shadow">
           <div className="text-2xl mb-2">🔑</div>
@@ -804,7 +842,7 @@ export function Dashboard() {
 
                 <div className="mt-4 flex items-center justify-between">
                   <div className="text-sm text-ios-gray dark:text-gray-400">
-                    Начисленные проценты к выплате: <span className="font-semibold text-gray-900 dark:text-white">{computeAccruedInterest(selectedAccount.id).toLocaleString('ru-RU')} ₽</span>
+                    Начисленные проценты к выплате: <span className="font-semibold text-gray-900 dark:text-white">{accruedInterest.toLocaleString('ru-RU')} ₽</span>
                   </div>
                   <button onClick={handleApplyInterest} className="px-4 py-2 rounded-ios bg-ios-purple text-white hover:bg-purple-600">Начислить проценты</button>
                 </div>
@@ -1022,6 +1060,9 @@ export function Dashboard() {
                     </div>
                     <div className="text-xl">📈</div>
                   </div>
+                  <div className="mt-2 text-sm text-gray-900 dark:text-white">
+                    Денег: {formatBalance(Math.round(brokerCash[(acc.id || acc.accountId) as string] || 0))}
+                  </div>
                   {acc.status && (
                     <div className="mt-2 text-xs text-ios-gray dark:text-gray-400">Статус: {acc.status}</div>
                   )}
@@ -1037,6 +1078,8 @@ export function Dashboard() {
                       // @ts-ignore
                       const pos = await window.electronAPI?.getPositions?.(acc.id || acc.accountId)
                       setPositions(pos?.ok ? pos.data : { error: pos?.error })
+                      // обновим кэш денег после ручной загрузки
+                      await loadBrokerCash([acc])
                     }}>Портфель</button>
                   </div>
                 </div>
@@ -1086,11 +1129,11 @@ export function Dashboard() {
           />
           <div className="flex gap-2">
             <button className="px-4 py-2 rounded-ios bg-ios-blue text-white" onClick={async () => {
-              // @ts-ignore
-              const r = await window.electronAPI?.setTinkoffToken?.(tokenValue)
-              if (r?.ok) {
-                setShowToken(false)
-              }
+              try {
+                const r = await fetch('/api/token', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: tokenValue }) })
+                const j = await r.json()
+                if (j?.ok) setShowToken(false)
+              } catch {}
             }}>Сохранить</button>
             <button className="px-4 py-2 rounded-ios bg-ios-gray5 dark:bg-gray-700" onClick={() => setShowToken(false)}>Отмена</button>
           </div>

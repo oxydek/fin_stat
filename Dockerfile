@@ -6,12 +6,13 @@ RUN apk add --no-cache python3 make g++
 
 WORKDIR /app
 
-# Install full dependencies (include dev for build tools like vite)
-COPY package.json ./
-RUN npm install
+# Install deps (use lockfile for caching)
+COPY package.json package-lock.json ./
+RUN npm ci
 
-# Copy sources
-COPY . .
+# Copy only necessary project files
+COPY tsconfig.json tsconfig.node.json vite.config.ts postcss.config.js tailwind.config.js index.html ./
+COPY src ./src
 
 # Build Vite app
 ENV NODE_ENV=production

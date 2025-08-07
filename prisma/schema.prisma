@@ -21,6 +21,10 @@ model Account {
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
+  // deposit settings on server
+  interestRate Float?
+  rateBuckets  Json?
   
   transactions Transaction[]
   goalContributions GoalContribution[]
@@ -110,6 +114,7 @@ model Settings {
   currency  String   @default("RUB")
   language  String   @default("ru")
   theme     String   @default("auto") // 'light', 'dark', 'auto'
+  tinkoffToken String?
   
   updatedAt DateTime @updatedAt
 }
