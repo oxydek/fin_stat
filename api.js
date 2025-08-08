@@ -2,6 +2,15 @@ import express from 'express'
 import cors from 'cors'
 import bodyParser from 'body-parser'
 import { PrismaClient } from '@prisma/client'
+// Add Tinkoff Invest API client
+let TinkoffInvestApi
+try {
+  // dynamic import to avoid crash if package not installed in some environments
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  TinkoffInvestApi = (await import('tinkoff-invest-api')).TinkoffInvestApi
+} catch (e) {
+  TinkoffInvestApi = null
+}
 
 const app = express()
 const prisma = new PrismaClient()
@@ -169,6 +178,84 @@ app.post('/api/goals/:id/contributions', async (req, res) => {
     res.status(500).json({ ok: false, error: e instanceof Error ? e.message : String(e) })
   }
 })
+
+// --- Broker sync (T‑Invest) ---
+async function syncBrokerAccounts() {
+  try {
+    // read token
+    const settings = await prisma.settings.findUnique({ where: { id: 'settings' } })
+    const token = settings?.tinkoffToken || ''
+    if (!token) return { ok: false, reason: 'NO_TOKEN' }
+    if (!TinkoffInvestApi) return { ok: false, reason: 'LIB_NOT_INSTALLED' }
+
+    const api = new TinkoffInvestApi({ token })
+
+    // get accounts
+    const accountsResp = await api.users.getAccounts({})
+    const accounts = accountsResp?.accounts || []
+
+    const results = []
+    for (const acc of accounts) {
+      const accountId = acc.id || acc.accountId || acc.brokerAccountId || acc.brokerAccountId_
+      // get cash positions
+      let rubCash = 0
+      try {
+        const pos = await api.operations.getPositions({ accountId })
+        const moneyArr = Array.isArray(pos?.money) ? pos.money : (Array.isArray(pos?.money?.money) ? pos.money.money : [])
+        for (const mv of moneyArr) {
+          const ccy = String(mv?.currency || mv?.value?.currency || mv?.money?.currency || 'rub').toLowerCase()
+          const units = Number((mv.units ?? mv.value?.units) ?? 0)
+          const nano = Number((mv.nano ?? mv.value?.nano) ?? 0)
+          const val = units + nano / 1_000_000_000
+          if (ccy === 'rub' || ccy === 'rur') rubCash += val
+        }
+      } catch {}
+
+      const externalId = `tinkoff-invest:${accountId}`
+      const name = `T‑Invest • ${acc?.name || acc?.brokerAccountType || 'Счет'}`
+
+      const upserted = await prisma.account.upsert({
+        where: { externalId },
+        update: {
+          name,
+          type: 'broker',
+          currency: 'RUB',
+          icon: '📈',
+          color: '#0ea5e9',
+          isActive: true,
+          balance: Math.round(rubCash)
+        },
+        create: {
+          name,
+          type: 'broker',
+          currency: 'RUB',
+          icon: '📈',
+          color: '#0ea5e9',
+          isActive: true,
+          balance: Math.round(rubCash),
+          externalSource: 'tinkoff-invest',
+          externalId
+        }
+      })
+      results.push(upserted)
+    }
+
+    return { ok: true, data: results }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+app.post('/api/sync/broker', async (_req, res) => {
+  const r = await syncBrokerAccounts()
+  if (!r.ok) return res.status(500).json(r)
+  res.json(r)
+})
+
+// background periodic sync (every 5 minutes)
+setInterval(async () => {
+  try { await syncBrokerAccounts() } catch {}
+}, 5 * 60 * 1000)
 
 const PORT = process.env.PORT || 4000
 app.listen(PORT, () => {

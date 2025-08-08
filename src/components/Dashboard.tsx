@@ -88,6 +88,10 @@ export function Dashboard() {
 
   useEffect(() => {
     loadData()
+    const intervalId = setInterval(() => {
+      loadData()
+    }, 60 * 1000)
+    return () => clearInterval(intervalId)
   }, [])
 
   useEffect(() => {
@@ -579,26 +583,16 @@ export function Dashboard() {
 
         <button onClick={async () => {
           try {
-            setBrokerError('')
-            // @ts-ignore
-            const res = await window.electronAPI?.getBrokerAccounts?.()
-            if (!res || !res.ok) {
-              setBrokerError(res?.error || 'Не удалось получить данные')
-              setBrokerAccounts([])
-            } else {
-              setBrokerAccounts(res.data || [])
-              await loadBrokerCash(res.data || [])
-            }
-            setShowBroker(true)
-          } catch (e:any) {
-            setBrokerError(e?.message || String(e))
-            setBrokerAccounts([])
-            setShowBroker(true)
+            const r = await fetch('/api/sync/broker', { method: 'POST' })
+            if (!r.ok) throw new Error('Синхронизация не удалась')
+            await loadData()
+          } catch (e) {
+            console.error(e)
           }
         }} className="bg-white dark:bg-gray-800 rounded-ios shadow-ios p-6 text-left hover:shadow-ios-card transition-shadow">
-          <div className="text-2xl mb-2">📈</div>
-          <h3 className="font-semibold text-gray-900 dark:text-white">Брокерские</h3>
-          <p className="text-sm text-ios-gray dark:text-gray-400">Счета T‑Invest</p>
+          <div className="text-2xl mb-2">🔄</div>
+          <h3 className="font-semibold text-gray-900 dark:text-white">Синхронизация</h3>
+          <p className="text-sm text-ios-gray dark:text-gray-400">T‑Invest (фон: авто)</p>
         </button>
 
         <button onClick={async () => {
