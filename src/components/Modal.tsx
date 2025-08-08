@@ -37,7 +37,7 @@ export function Modal({ isOpen, onClose, title, children }: ModalProps) {
       />
       
       {/* Modal */}
-      <div className="relative w-full max-w-md mx-4 bg-white dark:bg-gray-800 rounded-ios shadow-ios-card transform transition-all">
+      <div className="relative w-full mx-4 bg-white dark:bg-gray-800 rounded-ios shadow-ios-card transform transition-all max-w-lg sm:max-w-2xl lg:max-w-4xl xl:max-w-5xl">
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-ios-gray5 dark:border-gray-700">
           <h3 className="text-xl font-semibold text-gray-900 dark:text-white">
@@ -54,7 +54,7 @@ export function Modal({ isOpen, onClose, title, children }: ModalProps) {
         </div>
         
         {/* Content */}
-        <div className="p-6">
+        <div className="p-6 text-gray-900 dark:text-white">
           {children}
         </div>
       </div>
