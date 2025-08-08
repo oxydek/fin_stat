@@ -85,6 +85,10 @@ export function Dashboard() {
   const [positions, setPositions] = useState(null)
   const [showCloseConfirm, setShowCloseConfirm] = useState(false)
   const [accruedInterest, setAccruedInterest] = useState(0)
+  // новые агрегаты для инвестиций
+  const [brokerPortfolioValue, setBrokerPortfolioValue] = useState({} as Record<string, number>)
+  const [brokerTotals, setBrokerTotals] = useState({ totalPortfolio: 0, totalCash: 0 })
+  const [portfolioLoading, setPortfolioLoading] = useState(false)
 
   useEffect(() => {
     loadData()
@@ -390,11 +394,10 @@ export function Dashboard() {
       const entries = await Promise.all((list || []).map(async (acc: any) => {
         const id = acc.id || acc.accountId
         try {
-          // @ts-ignore
-          const res = await window.electronAPI?.getPositions?.(id)
+          const r = await fetch(`/api/broker/positions?accountId=${encodeURIComponent(id)}`)
+          const res = await r.json()
           if (res?.ok && res.data?.money) {
             const moneyArr = Array.isArray(res.data.money) ? res.data.money : []
-            // Берем только RUB
             const rubSum = moneyArr
               .filter((mv: any) => String(mv.currency || mv?.value?.currency || 'RUB').toUpperCase() === 'RUB')
               .reduce((sum: number, mv: any) => sum + moneyValueToNumber(mv), 0)
@@ -406,8 +409,57 @@ export function Dashboard() {
       const map: Record<string, number> = {}
       entries.forEach(([id, val]) => { map[id] = val })
       setBrokerCash(map)
+      // пересчитать агрегат
+      const totalCash = Object.values(map).reduce((a, b) => a + (b || 0), 0)
+      setBrokerTotals((t) => ({ ...t, totalCash }))
     } catch {}
   }
+
+  // загрузка общей стоимости портфеля по счетам
+  const loadBrokerPortfolioValues = async (list: any[]) => {
+    try {
+      const entries = await Promise.all((list || []).map(async (acc: any) => {
+        const id = acc.id || acc.accountId
+        try {
+          const r = await fetch(`/api/broker/portfolio?accountId=${encodeURIComponent(id)}`)
+          const res = await r.json()
+          if (res?.ok) {
+            const total = moneyValueToNumber(res?.data?.totalAmountPortfolio)
+            if (total > 0) return [id, total] as [string, number]
+            // fallback: посчитать по позициям
+            const positions = Array.isArray(res?.data?.positions) ? res.data.positions : []
+            const calc = positions.reduce((sum: number, p: any) => {
+              const qtyUnits = Number(p?.quantity?.units ?? 0) + Number(p?.quantity?.nano ?? 0) / 1_000_000_000
+              const price = moneyValueToNumber(p?.currentPrice)
+              return sum + qtyUnits * price
+            }, 0)
+            return [id, calc] as [string, number]
+          }
+        } catch {}
+        return [id, 0] as [string, number]
+      }))
+      const map: Record<string, number> = {}
+      entries.forEach(([id, val]) => { map[id] = val })
+      setBrokerPortfolioValue(map)
+      const totalPortfolio = Object.values(map).reduce((a, b) => a + (b || 0), 0)
+      setBrokerTotals((t) => ({ ...t, totalPortfolio }))
+    } catch {}
+  }
+
+  // сводка на главной — при первом рендере
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch('/api/broker/accounts')
+        const j = await r.json()
+        if (j?.ok) {
+          const list = j.data || []
+          await Promise.all([loadBrokerCash(list), loadBrokerPortfolioValues(list)])
+        }
+      } catch {}
+    })()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // ===== Statistics helpers =====
   const readTransactions = async () => {
@@ -530,7 +582,7 @@ export function Dashboard() {
       </div>
 
       {/* Quick Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
         <div className="bg-gradient-to-br from-ios-blue to-ios-indigo rounded-ios p-6 text-white">
           <h3 className="text-lg font-medium mb-2">Общий баланс</h3>
           <p className="text-3xl font-bold">{formatBalance(totalBalance)}</p>
@@ -542,6 +594,13 @@ export function Dashboard() {
         <div className="bg-gradient-to-br from-ios-orange to-ios-yellow rounded-ios p-6 text-white">
           <h3 className="text-lg font-medium mb-2">Активных целей</h3>
           <p className="text-3xl font-bold">{activeGoals}</p>
+        </div>
+        <div className="bg-gradient-to-br from-gray-700 to-gray-900 rounded-ios p-6 text-white">
+          <h3 className="text-lg font-medium mb-2">Инвестиции</h3>
+          <div className="text-sm opacity-80">Стоимость портфелей</div>
+          <p className="text-2xl font-bold mb-2">{Math.round(brokerTotals.totalPortfolio).toLocaleString('ru-RU')} ₽</p>
+          <div className="text-sm opacity-80">Кэш RUB</div>
+          <p className="text-xl font-semibold">{Math.round(brokerTotals.totalCash).toLocaleString('ru-RU')} ₽</p>
         </div>
       </div>
 
@@ -580,14 +639,18 @@ export function Dashboard() {
         <button onClick={async () => {
           try {
             setBrokerError('')
-            // @ts-ignore
-            const res = await window.electronAPI?.getBrokerAccounts?.()
-            if (!res || !res.ok) {
-              setBrokerError(res?.error || 'Не удалось получить данные')
+            // заменено: Electron → REST API
+            const r = await fetch('/api/broker/accounts')
+            const j = await r.json()
+            if (!j || !j.ok) {
+              setBrokerError(j?.error || 'Не удалось получить данные')
               setBrokerAccounts([])
             } else {
-              setBrokerAccounts(res.data || [])
-              await loadBrokerCash(res.data || [])
+              setBrokerAccounts(j.data || [])
+              await Promise.all([
+                loadBrokerCash(j.data || []),
+                loadBrokerPortfolioValues(j.data || [])
+              ])
             }
             setShowBroker(true)
           } catch (e:any) {
@@ -1018,6 +1081,21 @@ export function Dashboard() {
               Нет данных. Убедитесь, что установлен переменный окружения <span className="font-mono">TINKOFF_TOKEN</span> и перезапущено приложение.
             </div>
           )}
+
+          {/* Суммарная плашка по всем счетам */}
+          {brokerAccounts.length > 0 && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="bg-ios-gray6 dark:bg-gray-700 rounded-ios p-3">
+                <div className="text-xs text-ios-gray dark:text-gray-300">Стоимость портфелей</div>
+                <div className="text-lg font-semibold text-gray-900 dark:text-white">{Math.round(brokerTotals.totalPortfolio).toLocaleString('ru-RU')} ₽</div>
+              </div>
+              <div className="bg-ios-gray6 dark:bg-gray-700 rounded-ios p-3">
+                <div className="text-xs text-ios-gray dark:text-gray-300">Кэш RUB</div>
+                <div className="text-lg font-semibold text-gray-900 dark:text-white">{Math.round(brokerTotals.totalCash).toLocaleString('ru-RU')} ₽</div>
+              </div>
+            </div>
+          )}
+
           {brokerAccounts.length > 0 && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {(brokerAccounts as any[]).map((acc:any) => (
@@ -1030,7 +1108,12 @@ export function Dashboard() {
                     <div className="text-xl">📈</div>
                   </div>
                   <div className="mt-2 text-sm text-gray-900 dark:text-white">
-                    Денег: {formatBalance(Math.round(brokerCash[(acc.id || acc.accountId) as string] || 0))}
+                    <span className="text-xs uppercase text-ios-gray dark:text-gray-400 mr-2">Денег:</span>
+                    <span className="px-2 py-0.5 rounded-md bg-ios-gray6 dark:bg-gray-700 font-medium">{formatBalance(Math.round(brokerCash[(acc.id || acc.accountId) as string] || 0))}</span>
+                  </div>
+                  <div className="mt-1 text-sm text-gray-900 dark:text-white">
+                    <span className="text-xs uppercase text-ios-gray dark:text-gray-400 mr-2">Портфель:</span>
+                    <span className="px-2 py-0.5 rounded-md bg-ios-gray6 dark:bg-gray-700 font-medium">{formatBalance(Math.round(brokerPortfolioValue[(acc.id || acc.accountId) as string] || 0))}</span>
                   </div>
                   {acc.status && (
                     <div className="mt-2 text-xs text-ios-gray dark:text-gray-400">Статус: {acc.status}</div>
@@ -1041,13 +1124,23 @@ export function Dashboard() {
                   <div className="mt-3 flex gap-2">
                     <button className="px-3 py-2 rounded-ios bg-ios-blue text-white text-sm" onClick={async () => {
                       setSelectedBrokerId(acc.id || acc.accountId)
-                      // @ts-ignore
-                      const p = await window.electronAPI?.getPortfolio?.(acc.id || acc.accountId)
-                      setPortfolio(p?.ok ? p.data : { error: p?.error })
-                      // @ts-ignore
-                      const pos = await window.electronAPI?.getPositions?.(acc.id || acc.accountId)
-                      setPositions(pos?.ok ? pos.data : { error: pos?.error })
-                      // обновим кэш денег после ручной загрузки
+                      try {
+                        setPortfolioLoading(true)
+                        const rp = await fetch(`/api/broker/portfolio?accountId=${encodeURIComponent(acc.id || acc.accountId)}`)
+                        const jp = await rp.json()
+                        setPortfolio(jp?.ok ? jp.data : { error: jp?.error || 'Ошибка портфеля' })
+                      } catch (e:any) {
+                        setPortfolio({ error: e?.message || String(e) })
+                      }
+                      try {
+                        const rpos = await fetch(`/api/broker/positions?accountId=${encodeURIComponent(acc.id || acc.accountId)}`)
+                        const jpos = await rpos.json()
+                        setPositions(jpos?.ok ? jpos.data : { error: jpos?.error || 'Ошибка позиций' })
+                      } catch (e:any) {
+                        setPositions({ error: e?.message || String(e) })
+                      } finally {
+                        setPortfolioLoading(false)
+                      }
                       await loadBrokerCash([acc])
                     }}>Портфель</button>
                   </div>
@@ -1063,18 +1156,99 @@ export function Dashboard() {
             <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="bg-white dark:bg-gray-800 rounded-ios p-4 border border-ios-gray5 dark:border-gray-700">
                 <div className="font-medium mb-2">Портфель — {selectedBrokerId}</div>
-                {portfolio?.error ? (
-                  <div className="text-sm text-red-500">{portfolio.error}</div>
+                {portfolioLoading ? (
+                  <div className="text-sm text-ios-gray dark:text-gray-400">Загрузка...</div>
+                ) : portfolio?.error ? (
+                  <div className="text-sm text-red-500">{(portfolio as any).error}</div>
                 ) : (
-                  <pre className="text-xs whitespace-pre-wrap break-all">{JSON.stringify(portfolio, null, 2)}</pre>
+                  <div className="space-y-3 text-sm text-gray-900 dark:text-white">
+                    {(() => {
+                      const qToNumber = (q:any) => {
+                        const units = Number(q?.units ?? q?.value?.units ?? 0)
+                        const nano = Number(q?.nano ?? q?.value?.nano ?? 0)
+                        return units + nano / 1_000_000_000
+                      }
+                      const mvToNumber = (m:any) => moneyValueToNumber(m)
+
+                      const totalRub = mvToNumber((portfolio as any)?.totalAmountPortfolio)
+                      const positionsArr: any[] = Array.isArray((portfolio as any)?.positions) ? (portfolio as any).positions : []
+                      const rows = positionsArr.map((p:any) => {
+                        const ticker = p.ticker || p.figi || p.instrumentUid || '—'
+                        const qty = qToNumber(p.quantity)
+                        const priceRub = mvToNumber(p.currentPrice)
+                        const valueRub = Math.round(qty * priceRub)
+                        return { ticker, qty, priceRub, valueRub }
+                      })
+                      const totalBySum = rows.reduce((s, r) => s + r.valueRub, 0)
+
+                      return (
+                        <>
+                          <div className="bg-ios-gray6 dark:bg-gray-700 rounded-ios p-3 flex items-center justify-between">
+                            <div className="text-ios-gray dark:text-gray-300">Стоимость портфеля</div>
+                            <div className="font-semibold">{(totalRub || totalBySum).toLocaleString('ru-RU')} ₽</div>
+                          </div>
+
+                          {rows.length > 0 ? (
+                            <div className="border border-ios-gray5 dark:border-gray-700 rounded-ios overflow-hidden">
+                              <div className="grid grid-cols-4 text-xs bg-ios-gray6 dark:bg-gray-700 text-ios-gray dark:text-gray-300 px-3 py-2 sticky top-0">
+                                <div>Тикер</div>
+                                <div className="text-right">Кол-во</div>
+                                <div className="text-right">Цена</div>
+                                <div className="text-right">Стоимость</div>
+                              </div>
+                              <div className="max-h-80 overflow-auto divide-y divide-ios-gray5 dark:divide-gray-700">
+                                {rows.sort((a,b)=>b.valueRub-a.valueRub).map((r:any) => (
+                                  <div key={r.ticker} className="grid grid-cols-4 px-3 py-2">
+                                    <div className="truncate">{r.ticker}</div>
+                                    <div className="text-right">{r.qty}</div>
+                                    <div className="text-right">{r.priceRub.toLocaleString('ru-RU')} ₽</div>
+                                    <div className="text-right font-medium">{r.valueRub.toLocaleString('ru-RU')} ₽</div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ) : null}
+                        </>
+                      )
+                    })()}
+                  </div>
                 )}
               </div>
               <div className="bg-white dark:bg-gray-800 rounded-ios p-4 border border-ios-gray5 dark:border-gray-700">
                 <div className="font-medium mb-2">Позиции — {selectedBrokerId}</div>
                 {positions?.error ? (
-                  <div className="text-sm text-red-500">{positions.error}</div>
+                  <div className="text-sm text-red-500">{(positions as any).error}</div>
                 ) : (
-                  <pre className="text-xs whitespace-pre-wrap break-all">{JSON.stringify(positions, null, 2)}</pre>
+                  <div className="space-y-3 text-sm text-gray-900 dark:text-white">
+                    {(() => {
+                      const moneyArr = Array.isArray((positions as any)?.money) ? (positions as any).money : []
+                      const rows = moneyArr.map((m:any) => {
+                        const currency = String(m?.currency || m?.value?.currency || 'RUB').toUpperCase()
+                        const amount = moneyValueToNumber(m)
+                        return { currency, amount }
+                      })
+                      return (
+                        <div className="border border-ios-gray5 dark:border-gray-700 rounded-ios overflow-hidden">
+                          <div className="grid grid-cols-2 text-xs bg-ios-gray6 dark:bg-gray-700 text-ios-gray dark:text-gray-300 px-3 py-2">
+                            <div>Валюта</div>
+                            <div className="text-right">Сумма</div>
+                          </div>
+                          <div className="max-h-80 overflow-auto divide-y divide-ios-gray5 dark:divide-gray-700">
+                            {rows.map((r:any) => (
+                              <div key={r.currency} className="grid grid-cols-2 px-3 py-2">
+                                <div>{r.currency}</div>
+                                <div className="text-right font-medium">{Math.round(r.amount).toLocaleString('ru-RU')} ₽</div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )
+                    })()}
+                    <details className="mt-2">
+                      <summary className="cursor-pointer text-xs text-ios-gray dark:text-gray-400">Показать сырой ответ</summary>
+                      <pre className="text-xs whitespace-pre-wrap break-all mt-2">{JSON.stringify(positions, null, 2)}</pre>
+                    </details>
+                  </div>
                 )}
               </div>
             </div>

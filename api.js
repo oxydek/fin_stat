@@ -170,6 +170,90 @@ app.post('/api/goals/:id/contributions', async (req, res) => {
   }
 })
 
+// ===== Broker API (T‑Invest via OpenAPI v1) =====
+async function getTinkoffToken() {
+  const s = await prisma.settings.findUnique({ where: { id: 'settings' } })
+  const token = (s?.tinkoffToken || '').trim()
+  if (!token) throw new Error('TINKOFF_TOKEN is not set')
+  return token
+}
+
+// V1 helper (legacy)
+async function tiFetch(pathWithQuery) {
+  const token = await getTinkoffToken()
+  const url = `https://api-invest.tinkoff.ru/openapi${pathWithQuery}`
+  const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+  if (!r.ok) {
+    const text = await r.text().catch(() => '')
+    throw new Error(`T-Invest API v1 error ${r.status}: ${text || r.statusText}`)
+  }
+  const j = await r.json().catch(() => ({}))
+  return j?.payload ?? j
+}
+
+// V2 helper (preferred REST gateway)
+async function tiFetchV2(methodPath, body = {}) {
+  const token = await getTinkoffToken()
+  const url = `https://invest-public-api.tinkoff.ru/rest/${methodPath}`
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(body || {})
+  })
+  if (!r.ok) {
+    const text = await r.text().catch(() => '')
+    throw new Error(`T-Invest API v2 error ${r.status}: ${text || r.statusText}`)
+  }
+  return r.json().catch(() => ({}))
+}
+
+// Список брокерских счетов (v2 с fallback на v1)
+app.get('/api/broker/accounts', async (_req, res) => {
+  try {
+    try {
+      const j = await tiFetchV2('tinkoff.public.invest.api.contract.v1.UsersService/GetAccounts', {})
+      const accounts = Array.isArray(j?.accounts) ? j.accounts : []
+      if (accounts.length > 0) return res.json({ ok: true, data: accounts })
+      // если пусто, попробуем v1
+    } catch (e) {
+      // игнорируем и попробуем v1
+    }
+    const payload = await tiFetch('/user/accounts')
+    const accountsV1 = Array.isArray(payload?.accounts) ? payload.accounts : []
+    res.json({ ok: true, data: accountsV1 })
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e instanceof Error ? e.message : String(e) })
+  }
+})
+
+// Портфель по счету (v2)
+app.get('/api/broker/portfolio', async (req, res) => {
+  try {
+    const accountId = String(req.query.accountId || '')
+    if (!accountId) return res.status(400).json({ ok: false, error: 'accountId is required' })
+    const j = await tiFetchV2('tinkoff.public.invest.api.contract.v1.OperationsService/GetPortfolio', { accountId })
+    res.json({ ok: true, data: j })
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e instanceof Error ? e.message : String(e) })
+  }
+})
+
+// Денежные позиции (v2)
+app.get('/api/broker/positions', async (req, res) => {
+  try {
+    const accountId = String(req.query.accountId || '')
+    if (!accountId) return res.status(400).json({ ok: false, error: 'accountId is required' })
+    const j = await tiFetchV2('tinkoff.public.invest.api.contract.v1.OperationsService/GetPositions', { accountId })
+    // Вернем money как есть; фронтенд агрегирует RUB
+    res.json({ ok: true, data: { money: j?.money ?? [] } })
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e instanceof Error ? e.message : String(e) })
+  }
+})
+
 const PORT = process.env.PORT || 4000
 app.listen(PORT, () => {
   console.log(`[api] listening on :${PORT}`)

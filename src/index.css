@@ -9,4 +9,21 @@ body {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* Readability for inputs in light/dark themes */
+@layer base {
+  input, select, textarea {
+    color: #111827; /* text-gray-900 */
+  }
+  .dark input, .dark select, .dark textarea {
+    color: #ffffff; /* text-white */
+    caret-color: #ffffff;
+  }
+  input::placeholder, textarea::placeholder {
+    color: #6B7280; /* text-gray-500 */
+  }
+  .dark input::placeholder, .dark textarea::placeholder {
+    color: #9CA3AF; /* text-gray-400 */
+  }
 } 
