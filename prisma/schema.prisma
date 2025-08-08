@@ -26,6 +26,10 @@ model Account {
   interestRate Float?
   rateBuckets  Json?
   
+  // external linkage for API-based accounts (e.g., T‑Invest)
+  externalSource String? // e.g., 'tinkoff-invest'
+  externalId     String? @unique
+  
   transactions Transaction[]
   goalContributions GoalContribution[]
 }
