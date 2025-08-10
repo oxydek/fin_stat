@@ -39,6 +39,8 @@ interface TransactionItem {
   categoryId?: string | null
 }
 
+type BrokerTotals = { totalPortfolio: number; totalCash: number }
+
 export function Dashboard() {
   const [accounts, setAccounts] = useState([])
   const [goals, setGoals] = useState([])
@@ -87,7 +89,7 @@ export function Dashboard() {
   const [accruedInterest, setAccruedInterest] = useState(0)
   // новые агрегаты для инвестиций
   const [brokerPortfolioValue, setBrokerPortfolioValue] = useState({} as Record<string, number>)
-  const [brokerTotals, setBrokerTotals] = useState({ totalPortfolio: 0, totalCash: 0 })
+  const [brokerTotals, setBrokerTotals] = useState({ totalPortfolio: 0, totalCash: 0 } as BrokerTotals)
   const [portfolioLoading, setPortfolioLoading] = useState(false)
 
   useEffect(() => {
@@ -365,8 +367,10 @@ export function Dashboard() {
     await loadAccountTransactions(selectedAccount.id)
   }
 
-  const totalBalance = (accounts as any[]).reduce((sum: number, account: any) => sum + account.balance, 0)
-  const totalSavings = (goals as any[]).reduce((sum: number, goal: any) => sum + goal.currentAmount, 0)
+  const accountsTotal = (accounts as any[]).reduce((sum: number, account: any) => sum + (account.balance || 0), 0)
+  const investmentsTotal = (brokerTotals?.totalPortfolio || 0)
+  const totalBalance = accountsTotal + investmentsTotal
+  const totalSavings = accountsTotal
   const activeGoals = (goals as any[]).filter((goal: any) => !goal.isCompleted).length
 
   const formatBalance = (amount: number) => {
@@ -411,7 +415,7 @@ export function Dashboard() {
       setBrokerCash(map)
       // пересчитать агрегат
       const totalCash = Object.values(map).reduce((a, b) => a + (b || 0), 0)
-      setBrokerTotals((t) => ({ ...t, totalCash }))
+      setBrokerTotals((t: BrokerTotals) => ({ ...t, totalCash }))
     } catch {}
   }
 
@@ -442,7 +446,7 @@ export function Dashboard() {
       entries.forEach(([id, val]) => { map[id] = val })
       setBrokerPortfolioValue(map)
       const totalPortfolio = Object.values(map).reduce((a, b) => a + (b || 0), 0)
-      setBrokerTotals((t) => ({ ...t, totalPortfolio }))
+      setBrokerTotals((t: BrokerTotals) => ({ ...t, totalPortfolio }))
     } catch {}
   }
 
