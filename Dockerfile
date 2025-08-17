@@ -13,6 +13,7 @@ RUN npm ci
 # Copy only necessary project files
 COPY tsconfig.json tsconfig.node.json vite.config.ts postcss.config.js tailwind.config.js index.html ./
 COPY src ./src
+COPY public ./public
 
 # Build Vite app
 ENV NODE_ENV=production
