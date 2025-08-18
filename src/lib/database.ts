@@ -203,6 +203,14 @@ class MockPrismaClient {
       if (data.nextDate) rows[idx].nextDate = data.nextDate.toString()
       saveToStorage('reminders', rows)
       return rows[idx]
+    },
+    delete: async ({ where }: { where: { id: string } }) => {
+      const rows = loadFromStorage<ReminderRecord>('reminders')
+      const idx = rows.findIndex(r => r.id === where.id)
+      if (idx === -1) throw new Error('Reminder not found')
+      const [removed] = rows.splice(idx, 1)
+      saveToStorage('reminders', rows)
+      return removed
     }
   }
 

@@ -281,7 +281,7 @@ function App() {
 
 	const deleteReminder = async (id: string) => {
 		try {
-			await prisma.reminder.update({ where: { id }, data: { isActive: false } })
+			await prisma.reminder.delete({ where: { id } })
 			await loadReminders()
 		} catch {}
 	}
@@ -442,7 +442,7 @@ function App() {
 
 			{/* Lock Screen Overlay */}
 			{isLocked && (
-				<div className="fixed inset-0 z-[60] bg-black bg-opacity-60 flex items-center justify-center p-6">
+				<div className="fixed inset-0 z-[60] bg-black bg-opacity-90 backdrop-blur-md flex items-center justify-center p-6">
 					<div className="bg-white dark:bg-gray-800 w-full max-w-sm rounded-ios p-6 border border-ios-gray5 dark:border-gray-700 text-center">
 						<div className="text-3xl mb-2">🔒</div>
 						<div className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Приложение заблокировано</div>
