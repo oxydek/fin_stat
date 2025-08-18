@@ -9,6 +9,9 @@ services:
     container_name: finstat-app
     ports:
       - "3000:80"
+      - "3001:443"
+    volumes:
+      - ./certs:/etc/nginx/certs:ro
     depends_on:
       api:
         condition: service_healthy
@@ -38,6 +41,8 @@ services:
     container_name: finstat-api
     environment:
       DATABASE_URL: postgresql://finstat:finstat@db:5432/finstat
+      VAPID_PUBLIC_KEY: BAbsOGDUh-rAyT_OoHsJOudGJoH-3spFpJAGR6jIzNcMkt65kyLacbil2oyoNrSkLr9FNyZReIzNRsYdiIfhRsQ
+      VAPID_PRIVATE_KEY: GIaAFh69A2XTfF-QcCc87QR9xchBdJ9eYkgXGGFHY24
     depends_on:
       db:
         condition: service_healthy

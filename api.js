@@ -2,12 +2,24 @@ import express from 'express'
 import cors from 'cors'
 import bodyParser from 'body-parser'
 import { PrismaClient } from '@prisma/client'
+import webPush from 'web-push'
 
 const app = express()
 const prisma = new PrismaClient()
 
 app.use(cors())
 app.use(bodyParser.json())
+
+// VAPID setup for Web Push
+const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY || ''
+const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || ''
+if (VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY) {
+  try {
+    webPush.setVapidDetails('mailto:admin@example.com', VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY)
+  } catch (e) {
+    console.warn('[push] VAPID init failed:', e)
+  }
+}
 
 // Health
 app.get('/api/health', (_req, res) => {
@@ -30,7 +42,7 @@ app.get('/api/token', async (_req, res) => {
 app.post('/api/token', async (req, res) => {
   try {
     const token = String(req.body?.token || '')
-    const s = await prisma.settings.upsert({
+    await prisma.settings.upsert({
       where: { id: 'settings' },
       update: { tinkoffToken: token },
       create: { id: 'settings', tinkoffToken: token }
@@ -165,6 +177,82 @@ app.post('/api/goals/:id/contributions', async (req, res) => {
       data: { currentAmount: { increment: Math.abs(amount) } }
     })
     res.json({ ok: true, data: updated })
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e instanceof Error ? e.message : String(e) })
+  }
+})
+
+// ===== Reminders REST =====
+app.get('/api/reminders', async (_req, res) => {
+  try {
+    const rows = await prisma.reminder.findMany({ orderBy: { nextDate: 'asc' } })
+    res.json({ ok: true, data: rows })
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e instanceof Error ? e.message : String(e) })
+  }
+})
+app.patch('/api/reminders/:id', async (req, res) => {
+  try {
+    const { id } = req.params
+    const data = req.body || {}
+    const updated = await prisma.reminder.update({ where: { id }, data })
+    res.json({ ok: true, data: updated })
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e instanceof Error ? e.message : String(e) })
+  }
+})
+app.delete('/api/reminders/:id', async (req, res) => {
+  try {
+    const { id } = req.params
+    await prisma.reminder.delete({ where: { id } })
+    res.json({ ok: true })
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e instanceof Error ? e.message : String(e) })
+  }
+})
+
+// ===== Web Push =====
+app.get('/api/push/public-key', (_req, res) => {
+  res.json({ ok: true, data: VAPID_PUBLIC_KEY || '' })
+})
+
+app.post('/api/push/subscribe', async (req, res) => {
+  try {
+    const sub = req.body || {}
+    const endpoint = String(sub?.endpoint || '')
+    const p256dh = String(sub?.keys?.p256dh || '')
+    const auth = String(sub?.keys?.auth || '')
+    if (!endpoint || !p256dh || !auth) return res.status(400).json({ ok: false, error: 'Invalid subscription' })
+    await prisma.webPushSubscription.upsert({
+      where: { endpoint },
+      update: { p256dh, auth },
+      create: { endpoint, p256dh, auth }
+    })
+    res.json({ ok: true })
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e instanceof Error ? e.message : String(e) })
+  }
+})
+
+app.post('/api/push/test', async (_req, res) => {
+  try {
+    if (!VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY) return res.status(400).json({ ok: false, error: 'VAPID not configured' })
+    const subs = await prisma.webPushSubscription.findMany({})
+    let sent = 0, removed = 0
+    for (const s of subs) {
+      const subscription = { endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }
+      try {
+        await webPush.sendNotification(subscription, JSON.stringify({ title: 'FinStat', body: 'Тестовое Web Push уведомление' }))
+        sent++
+      } catch (err) {
+        const status = err?.statusCode
+        if (status === 404 || status === 410) {
+          removed++
+          await prisma.webPushSubscription.delete({ where: { endpoint: s.endpoint } }).catch(() => {})
+        }
+      }
+    }
+    res.json({ ok: true, data: { sent, removed } })
   } catch (e) {
     res.status(500).json({ ok: false, error: e instanceof Error ? e.message : String(e) })
   }

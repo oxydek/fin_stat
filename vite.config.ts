@@ -25,6 +25,7 @@ export default defineConfig({
 				],
 			},
 			workbox: {
+				navigateFallback: '/index.html',
 				runtimeCaching: [
 					{
 						urlPattern: /\/api\//,
@@ -37,10 +38,13 @@ export default defineConfig({
 					},
 				],
 			},
-			devOptions: {
-				enabled: true,
-				type: 'module',
+			workboxWindow: {
+				// no-op
 			},
+			srcDir: 'src',
+			filename: 'sw.js',
+			strategies: 'generateSW',
+			injectManifest: false,
 		})
 	],
 	base: './',
