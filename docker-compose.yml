@@ -8,8 +8,8 @@ services:
       target: production
     container_name: finstat-app
     ports:
-      - "3000:80"
-      - "3001:443"
+      - "80:80"
+      - "443:443"
     volumes:
       - ./certs:/etc/nginx/certs:ro
     depends_on:
